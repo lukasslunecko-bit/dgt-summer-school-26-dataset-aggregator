@@ -68,9 +68,10 @@ class AggregatorTests(unittest.TestCase):
         self.assertEqual(len(verification_golden) - 1, 2)
         self.assertEqual(len(production_golden) - 1, 8)
         self.assertEqual(len(complete_golden) - 1, 10)
+        self.assertEqual(complete_golden[0], ["FILENAME", "SEGMENT", "ORI", "TRA"])
         self.assertEqual(
-            [row[0] for row in verification_golden[1:]],
-            [row[0] for row in verification_modified[1:]],
+            [row[1] for row in verification_golden[1:]],
+            [row[1] for row in verification_modified[1:]],
         )
         other_name = aggregator.AGGREGATE_FILENAMES["paired_other_golden"]
         self.assertEqual(len(read_csv(output / "43-complete" / other_name)) - 1, 4)
@@ -78,6 +79,13 @@ class AggregatorTests(unittest.TestCase):
         self.assertEqual(len(read_csv(output / "43-complete" / orphan_name)) - 1, 4)
         self.assertTrue((output / aggregator.PROVENANCE_NAME).is_file())
         self.assertTrue((output / aggregator.REPORT_TEXT_NAME).is_file())
+        self.assertTrue((self.project / aggregator.OVERALL_REPORT_CSV_NAME).is_file())
+        self.assertTrue((self.project / aggregator.OVERALL_REPORT_TEXT_NAME).is_file())
+        overall_text = (self.project / aggregator.OVERALL_REPORT_TEXT_NAME).read_text(encoding="utf-8")
+        self.assertIn("Paired file pairs: 2", overall_text)
+        self.assertIn("Complete segments exported:", overall_text)
+        self.assertEqual(results[0].paired_file_pairs, 2)
+        self.assertEqual(results[0].orphaned_golden_files, 1)
 
     def test_identical_same_role_copy_is_aggregated_once(self):
         golden, modified = self.create_pair(count=3)
@@ -185,6 +193,60 @@ class AggregatorTests(unittest.TestCase):
         self.assertEqual(results[0].status, "dry-run")
         self.assertFalse((self.data / aggregator.OUTPUT_ROOT_NAME).exists())
         self.assertEqual(hashlib.sha256(golden.read_bytes()).hexdigest(), before)
+
+    def test_filename_column_can_be_disabled(self):
+        self.create_pair(count=2)
+        aggregator.aggregate_projects(
+            [self.project], auto_fix="yes", changed_file_action="reprocess",
+            decision_provider=self.decision, include_filename=False,
+        )
+        name = aggregator.AGGREGATE_FILENAMES["paired_core_golden"]
+        output = read_csv(self.data / aggregator.OUTPUT_ROOT_NAME / "43-complete" / name)
+        self.assertEqual(output[0], ["SEGMENT", "ORI", "TRA"])
+
+    def test_individual_files_incrementally_extend_existing_project(self):
+        self.create_pair(count=2)
+        aggregator.aggregate_projects(
+            [self.project], auto_fix="yes", changed_file_action="reprocess",
+            decision_provider=self.decision,
+        )
+        new_golden, new_modified = self.create_pair(
+            document="TEST-2026-00009-00-00", language="FR", count=3
+        )
+        result = aggregator.aggregate_projects(
+            [], auto_fix="yes", changed_file_action="reprocess",
+            decision_provider=self.decision,
+            individual_files=[new_golden, new_modified],
+        )[0]
+        self.assertEqual(result.selection_mode, "individual files")
+        self.assertEqual(result.selected_files, 2)
+        self.assertEqual(result.carried_forward_files, 2)
+        self.assertEqual(result.paired_file_pairs, 2)
+        name = aggregator.AGGREGATE_FILENAMES["paired_core_golden"]
+        output = read_csv(self.data / aggregator.OUTPUT_ROOT_NAME / "43-complete" / name)
+        self.assertEqual(len(output) - 1, 5)
+
+    def test_multi_project_run_writes_common_overall_report(self):
+        self.create_pair(count=2)
+        second_data = self.root / "Second project" / "Project data"
+        write_csv(
+            second_data / "1-golden-standard-files" / "TEST-2026-00020-00-00-00-DE-TRA-00 - Golden standard.csv",
+            [("1", "A", "B")],
+        )
+        write_csv(
+            second_data / "2-modified-files" / "TEST-2026-00020-00-00-00-DE-TRA-00 - Modified.csv",
+            [("1", "A", "C")],
+        )
+        results = aggregator.aggregate_projects(
+            [self.root], auto_fix="yes", changed_file_action="reprocess",
+            decision_provider=self.decision,
+        )
+        self.assertEqual(len(results), 2)
+        overall = self.root / aggregator.OVERALL_REPORT_TEXT_NAME
+        self.assertTrue(overall.is_file())
+        text = overall.read_text(encoding="utf-8")
+        self.assertIn("Projects/collections: 2", text)
+        self.assertIn("Second project", text)
 
 
 if __name__ == "__main__":
