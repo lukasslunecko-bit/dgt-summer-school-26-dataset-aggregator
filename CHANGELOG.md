@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Add a desktop multi-folder browser with native Ctrl+click and Shift+click range selection.
+- Retain single-folder navigation and an explicit option to add the currently displayed folder.
+
 ## 0.2.0
 
 - Rename the automatic-correction backup folder to `5-automated backups` while continuing to exclude legacy backup folders from scans.

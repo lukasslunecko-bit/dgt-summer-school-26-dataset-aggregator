@@ -49,7 +49,7 @@ On Windows, double-click `run_aggregator.bat`, or run:
 py -3 dgt_dataset_aggregator.py
 ```
 
-Add any number of project folders or `Project data` folders. The **Add files…** button accepts multiple CSV/TSV files in one selection. Use **Scan only** to preview the result without changing any source or output file. Use **Create aggregated datasets** to create the outputs.
+Add any number of project folders or `Project data` folders. **Add folders…** opens a folder browser where Ctrl+click or Shift+click selects several sibling folders at once; double-click navigates into a folder. The **Add files…** button accepts multiple CSV/TSV files in one selection. Use **Scan only** to preview the result without changing any source or output file. Use **Create aggregated datasets** to create the outputs.
 
 An individual-file run is incremental: inputs recorded by an earlier full-project run are retained from the content-hash cache. This prevents selecting two new files from accidentally replacing a complete project aggregate with only those two files. A project-folder scan remains authoritative.
 

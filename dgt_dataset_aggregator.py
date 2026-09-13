@@ -26,7 +26,7 @@ from typing import Callable, Iterable, Sequence
 
 
 APP_NAME = "DGT Summer School 2026 Dataset Aggregator"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 SCHEMA_VERSION = 1
 
 OUTPUT_ROOT_NAME = "4-Aggregated-datasets"
@@ -1652,6 +1652,136 @@ def run_gui(default_folders: Sequence[Path] = (), default_files: Sequence[Path] 
         print(f"Tkinter is unavailable: {exc}", file=sys.stderr)
         return 2
 
+    class MultiFolderDialog(tk.Toplevel):
+        """Folder browser whose child-folder list supports Ctrl/Shift selection."""
+
+        def __init__(self, parent: tk.Misc, initial_directory: Path) -> None:
+            super().__init__(parent)
+            self.title("Add project folders")
+            self.geometry("760x560")
+            self.minsize(580, 420)
+            self.transient(parent)
+            self.result: list[Path] = []
+            self.current_directory = (
+                initial_directory.resolve()
+                if initial_directory.is_dir()
+                else Path.cwd().resolve()
+            )
+            self.visible_paths: list[Path] = []
+            self.path_var = tk.StringVar(value=str(self.current_directory))
+            self.status_var = tk.StringVar(value="")
+            self._build()
+            self.navigate(self.current_directory)
+            self.protocol("WM_DELETE_WINDOW", self.cancel)
+            self.grab_set()
+            self.folder_box.focus_set()
+
+        def _build(self) -> None:
+            outer = ttk.Frame(self, padding=12)
+            outer.pack(fill=tk.BOTH, expand=True)
+            ttk.Label(
+                outer,
+                text="Select several folders with Ctrl+click or Shift+click, then add them together.",
+                font=("Segoe UI", 10, "bold"),
+            ).pack(anchor=tk.W)
+            ttk.Label(
+                outer,
+                text="Double-click a folder to browse inside it. Use Add current folder when the folder shown above is the one you need.",
+                wraplength=720,
+            ).pack(anchor=tk.W, pady=(2, 10))
+
+            path_frame = ttk.Frame(outer)
+            path_frame.pack(fill=tk.X)
+            ttk.Entry(path_frame, textvariable=self.path_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            ttk.Button(path_frame, text="Go", command=self.go_to_typed_path).pack(side=tk.LEFT, padx=(6, 0))
+            ttk.Button(path_frame, text="Browse…", command=self.choose_parent).pack(side=tk.LEFT, padx=(6, 0))
+            ttk.Button(path_frame, text="Up", command=self.go_up).pack(side=tk.LEFT, padx=(6, 0))
+
+            list_frame = ttk.Frame(outer)
+            list_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 4))
+            self.folder_box = tk.Listbox(
+                list_frame,
+                selectmode=tk.EXTENDED,
+                exportselection=False,
+            )
+            scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.folder_box.yview)
+            self.folder_box.configure(yscrollcommand=scrollbar.set)
+            self.folder_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.LEFT, fill=tk.Y)
+            self.folder_box.bind("<Double-Button-1>", self.open_double_clicked)
+            self.folder_box.bind("<<ListboxSelect>>", self.update_selection_status)
+
+            ttk.Label(outer, textvariable=self.status_var).pack(anchor=tk.W, pady=(0, 8))
+            buttons = ttk.Frame(outer)
+            buttons.pack(fill=tk.X)
+            ttk.Button(buttons, text="Cancel", command=self.cancel).pack(side=tk.RIGHT)
+            ttk.Button(buttons, text="Add selected folders", command=self.accept_selected).pack(side=tk.RIGHT, padx=(0, 8))
+            ttk.Button(buttons, text="Add current folder", command=self.accept_current).pack(side=tk.RIGHT, padx=(0, 8))
+
+        def navigate(self, directory: Path) -> None:
+            try:
+                resolved = directory.expanduser().resolve()
+                children = sorted(
+                    (path for path in resolved.iterdir() if path.is_dir()),
+                    key=lambda path: path.name.casefold(),
+                )
+            except OSError as exc:
+                messagebox.showerror("Cannot open folder", str(exc), parent=self)
+                return
+            self.current_directory = resolved
+            self.path_var.set(str(resolved))
+            self.visible_paths = children
+            self.folder_box.delete(0, tk.END)
+            for child in children:
+                self.folder_box.insert(tk.END, child.name)
+            self.status_var.set(f"{len(children)} subfolder(s). No folders selected.")
+
+        def go_to_typed_path(self) -> None:
+            self.navigate(Path(self.path_var.get().strip()))
+
+        def choose_parent(self) -> None:
+            selected = filedialog.askdirectory(
+                title="Choose the parent folder to browse",
+                initialdir=self.current_directory,
+                parent=self,
+            )
+            if selected:
+                self.navigate(Path(selected))
+
+        def go_up(self) -> None:
+            self.navigate(self.current_directory.parent)
+
+        def open_double_clicked(self, event: object) -> None:
+            selection = self.folder_box.curselection()
+            if len(selection) == 1:
+                self.navigate(self.visible_paths[selection[0]])
+
+        def update_selection_status(self, event: object | None = None) -> None:
+            selected = len(self.folder_box.curselection())
+            self.status_var.set(
+                f"{len(self.visible_paths)} subfolder(s). {selected} selected."
+            )
+
+        def accept_selected(self) -> None:
+            selection = self.folder_box.curselection()
+            if not selection:
+                messagebox.showinfo(
+                    "No folders selected",
+                    "Select one or more folders, or use Add current folder.",
+                    parent=self,
+                )
+                return
+            self.result = [self.visible_paths[index] for index in selection]
+            self.destroy()
+
+        def accept_current(self) -> None:
+            self.result = [self.current_directory]
+            self.destroy()
+
+        def cancel(self) -> None:
+            self.result = []
+            self.destroy()
+
     class AggregatorWindow(tk.Tk):
         def __init__(self) -> None:
             super().__init__()
@@ -1684,7 +1814,7 @@ def run_gui(default_folders: Sequence[Path] = (), default_files: Sequence[Path] 
             self.folder_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
             buttons = ttk.Frame(list_frame)
             buttons.pack(side=tk.LEFT, padx=(8, 0), anchor=tk.N)
-            ttk.Button(buttons, text="Add folder…", command=self.add_folder).pack(fill=tk.X)
+            ttk.Button(buttons, text="Add folders…", command=self.add_folder).pack(fill=tk.X)
             ttk.Button(buttons, text="Remove", command=self.remove_folders).pack(fill=tk.X, pady=(6, 0))
 
             ttk.Label(outer, text="Individual files", font=("Segoe UI", 11, "bold")).pack(anchor=tk.W, pady=(12, 0))
@@ -1735,9 +1865,20 @@ def run_gui(default_folders: Sequence[Path] = (), default_files: Sequence[Path] 
             self.log_box.pack(fill=tk.BOTH, expand=True)
 
         def add_folder(self) -> None:
-            folder = filedialog.askdirectory(title="Select project or Project data folder")
-            if folder and folder not in self.folder_list.get(0, tk.END):
-                self.folder_list.insert(tk.END, folder)
+            existing = list(self.folder_list.get(0, tk.END))
+            if existing:
+                initial = Path(existing[-1]).parent
+            else:
+                script_parent = Path(__file__).resolve().parent.parent
+                initial = script_parent if script_parent.is_dir() else Path.cwd()
+            dialog = MultiFolderDialog(self, initial)
+            self.wait_window(dialog)
+            known = set(existing)
+            for folder in dialog.result:
+                value = str(folder)
+                if value not in known:
+                    self.folder_list.insert(tk.END, value)
+                    known.add(value)
 
         def remove_folders(self) -> None:
             for index in reversed(self.folder_list.curselection()):
